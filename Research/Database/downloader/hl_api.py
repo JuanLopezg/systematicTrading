@@ -6,30 +6,42 @@ import pandas as pd
 from datetime import datetime, timedelta, timezone
 
 
-def fetchDailyHyperliquid(perp: str, nDays: int):
+
+def fetchDailyHyperliquid(perp: str, nDays: int, offset: int = 0):
     """
-    Fetch the last nDays OHLC data from a certain perp
+    Fetch nDays of daily OHLCV data from Hyperliquid, ending 'offset' days ago.
+
+    Returns:
+        pd.DataFrame with columns: ts, open, high, low, close, volume
+        where ts is a date (YYYY-MM-DD), without time info
     """
     info = Info(skip_ws=True)
-    end = datetime.now(timezone.utc)
-    start = end - timedelta(days = nDays)
+
+    # Define date range
+    end = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=offset)
+    start = end - timedelta(days=nDays)
+
     start_ms = int(start.timestamp() * 1000)
     end_ms = int(end.timestamp() * 1000)
-    
+
     candles = info.candles_snapshot(perp, "1d", start_ms, end_ms)
-    
+
     df = pd.DataFrame([
         {
-            "Date": datetime.fromtimestamp(c.get("t", 0) // 1000, tz=timezone.utc),
-            "Open": float(c["o"]),
-            "High": float(c["h"]),
-            "Low": float(c["l"]),
-            "Close": float(c["c"])
+            "ts": datetime.fromtimestamp(c.get("t", 0) // 1000, tz=timezone.utc).date(),  # just date part
+            "open": float(c["o"]),
+            "high": float(c["h"]),
+            "low": float(c["l"]),
+            "close": float(c["c"]),
+            "volume": float(c["v"]),
         }
         for c in candles
     ])
-    
+
     return df
+
+
+
 
 def fetchHourlyHyperliquid(perp: str, nHours: int):
     """
