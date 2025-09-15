@@ -14,100 +14,177 @@ import cmc_api as cmc_api
 if __name__ == "__main__":
     
     # -------------------------------------------------------------------------------------------------------------
-    #   Check actual top 50 of CoinMarketCap
-    #   Store new coins in CSV tracker of top 50 in Hyperliquid
-    #   Delete coins that have been out of Top 50 for 200 days
+    #  # Get today's coins from hyperliquid that are on the top 50 by marketcap from cmc excluding stables
+    #  - Define the dataframe # df_hl = [id  symbol]
     # -------------------------------------------------------------------------------------------------------------
+    
+    # Fetch data once
+    df_top = cmc_api.get_top_n(100)
+    df_meta = cmc_api.get_metadata(df_top["id"].tolist())
 
-    # Step 1: Fetch data from CMC
-    df_top75 = cmc_api.get_top_n(100)
-    df_meta = cmc_api.get_metadata(df_top75["id"].tolist())
-
-    df_merged = df_meta.merge(df_top75, on="id", how="inner")
-    df_no_stable = df_merged[~df_merged["stablecoin"]]
-
-    df_top50_full = (
-        df_no_stable.sort_values("cmc_rank", ascending=True)
-        .head(50)
-        .loc[:, ["id", "symbol", "market_cap"]]
+    # Merge and filter top 50 non-stablecoins, keep only id and symbol
+    df_top50 = (
+        df_meta.merge(df_top, on="id")
+        .loc[~df_meta["stablecoin"]]
+        .sort_values("cmc_rank")
+        .head(50)[["id", "symbol"]]
         .reset_index(drop=True)
     )
+
+    # Fetch active Hyperliquid perps
+    hl_perps = {r["perp"] for r in hl_api.hyperliquid_active_perps()}
+
+    # Filter to tokens with active HL perps, keep only id and symbol
+    df_hl = (
+        df_top50[df_top50["symbol"].map(lambda sym: d.matches(sym, hl_perps))]
+        .reset_index(drop=True)
+    )
+        
     
-    
-    
-    # narrow just to those ones listed on hyperliquid------------------------------------------------------------
-    
-    # Liste des symboles (ceux que tu veux tracker, ex: top50)
-    symbols = df_top50_full["symbol"].tolist()
+    # -------------------------------------------------------------------------------------------------------------
+    #  # Maintain a rolling list of coins to track:
+    #  - Reset daysOutOfTop50 to 0 if coin is in today’s Top 50
+    #  - Increment if missing, and drop if out for 100+ days
+    #  - Add new coins from today's Top 50
+    #  This determines which coins to download historical data for. ( df_tracked = [id  symbol  daysOutOfTop50] )
+    # -------------------------------------------------------------------------------------------------------------
 
-    # Hyperliquid : récupérer les perps actifs
-    hl_rows  = hl_api.hyperliquid_active_perps()
-    hl_perps = [r["perp"] for r in hl_rows]  
+    # Load list of tracked coins 
+    df_tracked = d.load_top50_history("tracked_coins")
 
-    # Filtrer df_hist pour ne garder que les coins présents dans Hyperliquid
-    df_hl = df_top50_full[df_top50_full["symbol"].apply(lambda sym: d.matches(sym, hl_perps))].reset_index(drop=True)
+    # Normalize dtypes if not empty
+    if not df_tracked.empty:
+        df_tracked = df_tracked.astype({"id": int, "daysOutOfTop50": int})
 
-    # Ajouter une colonne "perp" avec les noms des perps HL correspondants
-    df_hl["perp"] = df_hl["symbol"].apply(lambda sym: d.find_matching_perp(sym, hl_perps))
-    
-    df_id_perp = df_hl[["id", "perp"]]
-
-    # Step 2: Load CSV history
-    df_hist = d.load_top50_history("tracked_coins")
-
-    # Normalize dtypes
-    if not df_hist.empty:
-        df_hist["id"] = df_hist["id"].astype(int)
-        df_hist["daysOutOfTop50"] = df_hist["daysOutOfTop50"].astype(int)
-
+   # Build today's ID set from df_hl
     todays_ids = set(df_hl["id"].astype(int))
+    symbol_map = df_hl.set_index("id")["symbol"].to_dict()
 
-    if df_hist.empty:
-        # Initialize from scratch
-        df_hist = pd.DataFrame({
+    if df_tracked.empty:
+        # Initialize tracking from scratch
+        df_tracked = pd.DataFrame({
             "id": sorted(todays_ids),
-            "symbol": df_hl.set_index("id").loc[sorted(todays_ids), "symbol"].values,
+            "symbol": [symbol_map.get(i, "") for i in sorted(todays_ids)],
             "daysOutOfTop50": 0
         })
     else:
-        # Reset to 0 if in today's Top 50
-        mask_in = df_hist["id"].isin(todays_ids)
-        df_hist.loc[mask_in, "daysOutOfTop50"] = 0
+        # Mark coins in/out of today's top 50
+        in_today = df_tracked["id"].isin(todays_ids)
+        
+        df_tracked.loc[in_today, "daysOutOfTop50"] = 0
+        df_tracked.loc[~in_today, "daysOutOfTop50"] += 1
 
-        # Increment if not in today's Top 50
-        mask_out = ~mask_in
-        df_hist.loc[mask_out, "daysOutOfTop50"] += 1
+        # Remove coins that have been out of the top 50 for 100+ days
+        df_tracked = df_tracked[df_tracked["daysOutOfTop50"] < 101].reset_index(drop=True)
 
-        # Drop coins that have been out for 100 days
-        df_hist = df_hist[df_hist["daysOutOfTop50"] < 200].reset_index(drop=True)
-
-        # Add new coins to history
-        hist_ids = set(df_hist["id"])
-        new_ids = sorted(todays_ids - hist_ids)
+        # Add new coins not yet tracked
+        existing_ids = set(df_tracked["id"])
+        new_ids = sorted(todays_ids - existing_ids)
+        
         if new_ids:
-            symbol_map = df_hl.set_index("id")["symbol"].to_dict()
             df_new = pd.DataFrame({
                 "id": new_ids,
                 "symbol": [symbol_map.get(i, "") for i in new_ids],
                 "daysOutOfTop50": 0
             })
-            df_hist = pd.concat([df_hist, df_new], ignore_index=True)
+            df_tracked = pd.concat([df_tracked, df_new], ignore_index=True)
 
-    # Optional: Sort by longest out of Top 50
-    df_hist = df_hist.sort_values(["daysOutOfTop50", "id"], ascending=[True, True]).reset_index(drop=True)
+    # Save updated tracking data
+    d.save_top50_history(df_tracked, "tracked_coins")
+    print(f"Top 50 tracker updated. Now tracking {len(df_tracked)} coins.")
 
-    # Step 3: Save updated history
-    d.save_top50_history(df_hist, "tracked_coins")
 
-    print(f"Top 50 tracker updated. Now tracking {len(df_hist)} coins.")
+
+
+
+
+
+
+    df_tracked = df_tracked.drop(columns=["daysOutOfTop50"]) #  df_tracked = [id  symbol]
+    df_tracked["perp"] = df_tracked["symbol"].map(lambda sym: d.find_matching_perp(sym, hl_perps))
+    df_tracked = df_tracked[df_tracked["perp"].notna()].reset_index(drop=True) # df_tracked = [id, symbol, perp]
+
+    today = datetime.now().date() 
+
+    # Load existing data if it exists
+    file_path = Path("dailyTop50ohclv_hl.parquet")
+
+    if file_path.exists():
+        df_existing = pd.read_parquet(file_path)
+    else:
+        df_existing = pd.DataFrame()
+        
+    # Initialize daysToFetch column
+    df_tracked["daysToFetch"] = 100  # default
+
+    # Compute daysToFetch per id
+    for i, row in df_tracked.iterrows():
+        id_val = row["id"]
+        df_id = df_existing[df_existing["id"] == id_val]
+
+        if not df_id.empty:
+            last_day = pd.to_datetime(df_id["ts"]).max().date()
+            days_diff = (today - last_day).days
+            df_tracked.at[i, "daysToFetch"] = days_diff
+        
+    # checkear al final que esta bien esta resta para calcular el numero de dias
+    # descargar todos ohclv y poner mcap a 0 menos el ultimo timestamp, recoger metadata y mergear (orden columnas mas eficiente)
+    # concatenar nuevas filas y asegurarse de que este todo en orden        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+
+    # 4. Check if yesterday's data already exists
+    if "ts" in df_existing.columns and yesterday in pd.to_datetime(df_existing["ts"]).dt.date.values:
+        print(f"Data for {yesterday_str} already exists — no update needed.")
+    else:
+        # 5. Append new rows
+        df_combined = pd.concat([df_existing, metadata_with_ohlcv], ignore_index=True)
+
+        # 6. Save updated data
+        df_combined.to_parquet(file_path, index=False)
+        print(f"Appended data for {yesterday_str} and saved to {file_path.name}.")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    tracking_ids_perp = df_tracked["id"].tolist()
+
+    df_id_perp = df_hl[["id", "perp"]]
+
+
+
+
+
 
 
     # Get full table of last 100 days of price action for all those coins
-    ids = df_hist["id"].tolist()
-    metadata  = cmc_api.get_metadata_full(ids)
+    ids = df_tracked["id"].tolist()
+    metadata  = cmc_api.get_metadata_full(ids)  # metadata = ['id', 'symbol', 'category', 'tags' (several columns of boolean values)]
     
     # Récupération du market cap + date (ts)
-    df_marketcap = cmc_api.get_marketcap_snapshot(ids)
+    df_marketcap = cmc_api.get_marketcap_snapshot(ids) # df_marketcap = [id, market_cap]  (df_top50 already has all coinswith cols id and market_cap, but it has more ids)
 
     # Fusionner les deux DataFrames sur 'id'
     metadata = pd.merge(metadata, df_marketcap, on="id", how="left")
@@ -129,6 +206,10 @@ if __name__ == "__main__":
     # -------------------------------------------------------------------------------------------------------------
     
   
+    
+    df_id_perp = df_hl[["id", "perp"]]
+
+
     
     # Apply fetchDailyHyperliquid to each perp
     ohlcv_data = df_id_perp["perp"].apply(lambda p: hl_api.fetchDailyHyperliquid(p, nDays=1, offset=0).iloc[0])
@@ -159,6 +240,13 @@ if __name__ == "__main__":
 
     # Reorder the DataFrame
     metadata_with_ohlcv = metadata_with_ohlcv[final_cols]
+    
+    
+    
+    
+    
+    
+    
     
 
     # 1. Define file path
