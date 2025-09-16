@@ -4,7 +4,7 @@ import pandas as pd
 import time
 import pandas as pd
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import downloader as d
 import hl_api as hl_api
@@ -104,7 +104,8 @@ if __name__ == "__main__":
     df_tracked["perp"] = df_tracked["symbol"].map(lambda sym: d.find_matching_perp(sym, hl_perps))
     df_tracked = df_tracked[df_tracked["perp"].notna()].reset_index(drop=True) # df_tracked = [id, symbol, perp]
 
-    today = datetime.now().date() 
+    # Use yesterday (last full day) instead of today
+    yesterday = (datetime.now(timezone.utc).date() - timedelta(days=1))
 
     # Load existing data if it exists
     file_path = Path("dailyTop50ohclv_hl.parquet")
@@ -124,12 +125,45 @@ if __name__ == "__main__":
 
         if not df_id.empty:
             last_day = pd.to_datetime(df_id["ts"]).max().date()
-            days_diff = (today - last_day).days
-            df_tracked.at[i, "daysToFetch"] = days_diff
+            days_diff = (yesterday - last_day).days
+            df_tracked.at[i, "daysToFetch"] = days_diff # df_tracked = [id, symbol, perp, daysToFetch]
         
-    # checkear al final que esta bien esta resta para calcular el numero de dias
-    # descargar todos ohclv y poner mcap a 0 menos el ultimo timestamp, recoger metadata y mergear (orden columnas mas eficiente)
-    # concatenar nuevas filas y asegurarse de que este todo en orden        
+    # Collect OHCLV data for all ids
+    ohclv_list = []
+
+    for i, row in df_tracked.iterrows():
+        ohclv = hl_api.fetchDailyHyperliquid(row["perp"], row["daysToFetch"], 0)  
+        # Expecting a DataFrame with columns: [ts, open, high, low, close, volume]
+
+        ohclv["market_cap"] = 0
+        ohclv["id"] = row["id"]
+        ohclv_list.append(ohclv)
+
+    # Combine all ohclv data into a single DataFrame
+    df_ohclv = pd.concat(ohclv_list, ignore_index=True)
+
+    # Merge with df_tracked to attach symbol, perp, daysToFetch to each OHCLV row
+    df_final = df_ohclv.merge(  # df_final = [id, symbol, ts, open, high, low, close, volume, market_cap]
+        df_tracked[["id", "symbol"]],
+        on="id",
+        how="left"
+    )
+        
+    ids = df_tracked["id"].tolist()
+    metadata  = cmc_api.get_metadata_full(ids)  # metadata = ['id', 'category', 'tags' (several columns of boolean values)]
+    df_final = df_final.merge(metadata, on="id", how="left") # df_final = [id, symbol, ts, open, high, low, close, volume, market_cap, category, tags (several columns of boolean values)]
+    
+    
+    df_marketcaps = cmc_api.get_marketcap_snapshot(ids)
+    for row in df_marketcaps:
+        mask = (df_final["id"] == row["id"]) & (df_final["ts"] == yesterday)
+        df_final.loc[mask, "market_cap"] = row["market_cap"]
+        
+    
+        
+    # hacer concat a lo que ya teniamos, si eso reorganizar columnas, checkear nulls     
+    
+   
         
         
         

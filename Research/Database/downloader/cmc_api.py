@@ -70,7 +70,7 @@ relevant_tags = [
     'medium-of-exchange', 'scrypt', 'layer-1', 'layer-2'
 ]
 
-cols = ['id', 'symbol', 'category', 'tags']
+cols = ['id', 'category', 'tags']
 
 def get_metadata_full(the_ids):
     if not isinstance(the_ids, (list, np.ndarray, pd.Series)):
