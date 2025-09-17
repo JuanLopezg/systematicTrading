@@ -5,6 +5,7 @@ import time
 import pandas as pd
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
+from sys import exit
 
 import downloader as d
 import hl_api as hl_api
@@ -100,209 +101,118 @@ if __name__ == "__main__":
 
 
 
-    df_tracked = df_tracked.drop(columns=["daysOutOfTop50"]) #  df_tracked = [id  symbol]
-    df_tracked["perp"] = df_tracked["symbol"].map(lambda sym: d.find_matching_perp(sym, hl_perps))
-    df_tracked = df_tracked[df_tracked["perp"].notna()].reset_index(drop=True) # df_tracked = [id, symbol, perp]
+    df_tracked = df_tracked.drop(columns=["daysOutOfTop50"])  # df_tracked = [id, symbol]
 
-    # Use yesterday (last full day) instead of today
+    # Match perps
+    df_tracked["perp"] = df_tracked["symbol"].map(lambda sym: d.find_matching_perp(sym, hl_perps))
+    df_tracked = df_tracked[df_tracked["perp"].notna()].reset_index(drop=True)  # [id, symbol, perp]
+
+    # Use yesterday (last full day)
     yesterday = (datetime.now(timezone.utc).date() - timedelta(days=1))
 
     # Load existing data if it exists
     file_path = Path("dailyTop50ohclv_hl.parquet")
+    df_existing = pd.read_parquet(file_path) if file_path.exists() else pd.DataFrame()
 
-    if file_path.exists():
-        df_existing = pd.read_parquet(file_path)
+    # If we have existing data, prepare latest_dates
+    if not df_existing.empty and "ts" in df_existing.columns:
+        df_existing["ts"] = pd.to_datetime(df_existing["ts"])
+
+        latest_dates = (
+            df_existing.groupby("id")["ts"]
+            .max()
+            .dt.date
+            .rename("last_ts")
+        )
+
+        df_tracked = df_tracked.merge(latest_dates, on="id", how="left")
     else:
-        df_existing = pd.DataFrame()
-        
-    # Initialize daysToFetch column
-    df_tracked["daysToFetch"] = 100  # default
+        df_tracked["last_ts"] = pd.NaT  # fill with NaT so .apply() works below
 
-    # Compute daysToFetch per id
-    for i, row in df_tracked.iterrows():
-        id_val = row["id"]
-        df_id = df_existing[df_existing["id"] == id_val]
+    # Compute daysToFetch
+    df_tracked["daysToFetch"] = (yesterday - df_tracked["last_ts"]).apply(
+        lambda x: x.days if pd.notnull(x) else 100
+    ).astype(int)
 
-        if not df_id.empty:
-            last_day = pd.to_datetime(df_id["ts"]).max().date()
-            days_diff = (yesterday - last_day).days
-            df_tracked.at[i, "daysToFetch"] = days_diff # df_tracked = [id, symbol, perp, daysToFetch]
+    # Drop the helper column
+    df_tracked = df_tracked.drop(columns=["last_ts"])
+
+    # Check if any coins need fetching
+    if not df_tracked["daysToFetch"].gt(0).any():
+        print("Nothing to fetch")
+        exit()
+
         
     # Collect OHCLV data for all ids
     ohclv_list = []
 
     for i, row in df_tracked.iterrows():
-        ohclv = hl_api.fetchDailyHyperliquid(row["perp"], row["daysToFetch"], 0)  
-        # Expecting a DataFrame with columns: [ts, open, high, low, close, volume]
+        try:
+            ohclv = hl_api.fetchDailyHyperliquid(row["perp"], row["daysToFetch"], 0)
+            if ohclv.empty:
+                print(f"No data for {row['symbol']} ({row['perp']})")
+                continue
 
-        ohclv["market_cap"] = 0
-        ohclv["id"] = row["id"]
-        ohclv_list.append(ohclv)
+            ohclv["market_cap"] = 0  # Placeholder, if you plan to enrich this later
+            ohclv["id"] = row["id"]
+            ohclv_list.append(ohclv)
+
+        except Exception as e:
+            print(f"Failed to fetch data for {row['symbol']} ({row['perp']}): {e}")
+            continue
 
     # Combine all ohclv data into a single DataFrame
-    df_ohclv = pd.concat(ohclv_list, ignore_index=True)
+    if ohclv_list:
+        df_ohclv = pd.concat(ohclv_list, ignore_index=True)
 
-    # Merge with df_tracked to attach symbol, perp, daysToFetch to each OHCLV row
-    df_final = df_ohclv.merge(  # df_final = [id, symbol, ts, open, high, low, close, volume, market_cap]
-        df_tracked[["id", "symbol"]],
-        on="id",
-        how="left"
-    )
+        # Merge with df_tracked to attach symbol to each OHCLV row
+        df_final = df_ohclv.merge(  # df_final = [id, symbol, ts, open, high, low, close, volume, market_cap]
+            df_tracked[["id", "symbol"]],
+            on="id",
+            how="left"
+        )
+        print(f"Fetched OHCLV data for {df_final['id'].nunique()} coins ({len(df_final)} rows).")
+    else:
+        print("No OHCLV data fetched. Exiting.")
+        exit()
         
+          
     ids = df_tracked["id"].tolist()
     metadata  = cmc_api.get_metadata_full(ids)  # metadata = ['id', 'category', 'tags' (several columns of boolean values)]
+    if metadata is None or metadata.empty:
+        print("ERROR: Metadata fetch failed or returned nothing. Exiting.")
+        exit()
     df_final = df_final.merge(metadata, on="id", how="left") # df_final = [id, symbol, ts, open, high, low, close, volume, market_cap, category, tags (several columns of boolean values)]
     
     
     df_marketcaps = cmc_api.get_marketcap_snapshot(ids)
-    for row in df_marketcaps:
-        mask = (df_final["id"] == row["id"]) & (df_final["ts"] == yesterday)
-        df_final.loc[mask, "market_cap"] = row["market_cap"]
+    if df_marketcaps.empty:
+        print("ERROR: Market cap snapshot is empty. Exiting.")
+        exit()
         
+    # Ensure date format is compatible
+    df_final["ts"] = pd.to_datetime(df_final["ts"]).dt.date
+    # Replace market_cap only for yesterday
+    for _, row in df_marketcaps.iterrows():
+    mask = (df_final["id"] == row["id"]) & (df_final["ts"] == yesterday)
+    df_final.loc[mask, "market_cap"] = row["market_cap"]
+        
+    if  df_final.isnull().values.any():
+        print("ERROR: None element found, exiting")
+        exit()
     
-        
-    # hacer concat a lo que ya teniamos, si eso reorganizar columnas, checkear nulls     
-    
-   
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-
-    # 4. Check if yesterday's data already exists
-    if "ts" in df_existing.columns and yesterday in pd.to_datetime(df_existing["ts"]).dt.date.values:
-        print(f"Data for {yesterday_str} already exists — no update needed.")
-    else:
-        # 5. Append new rows
-        df_combined = pd.concat([df_existing, metadata_with_ohlcv], ignore_index=True)
-
-        # 6. Save updated data
-        df_combined.to_parquet(file_path, index=False)
-        print(f"Appended data for {yesterday_str} and saved to {file_path.name}.")
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    tracking_ids_perp = df_tracked["id"].tolist()
-
-    df_id_perp = df_hl[["id", "perp"]]
-
-
-
-
-
-
-
-    # Get full table of last 100 days of price action for all those coins
-    ids = df_tracked["id"].tolist()
-    metadata  = cmc_api.get_metadata_full(ids)  # metadata = ['id', 'symbol', 'category', 'tags' (several columns of boolean values)]
-    
-    # Récupération du market cap + date (ts)
-    df_marketcap = cmc_api.get_marketcap_snapshot(ids) # df_marketcap = [id, market_cap]  (df_top50 already has all coinswith cols id and market_cap, but it has more ids)
-
-    # Fusionner les deux DataFrames sur 'id'
-    metadata = pd.merge(metadata, df_marketcap, on="id", how="left")
-
-    # Réorganiser les colonnes : ts et market_cap avant 'category'
-    if "category" in metadata.columns:
-        cat_idx = metadata.columns.get_loc("category")
-        # Reorder columns
-        cols = metadata.columns.tolist()
-        for col in ["ts", "market_cap"]:
-            if col in cols:
-                cols.insert(cat_idx, cols.pop(cols.index(col)))
-                cat_idx += 1  # décaler pour insérer l’autre juste après
-        metadata = metadata[cols]
-
-
-    # -------------------------------------------------------------------------------------------------------------
-    #   Fetch last daily OHLCV from Hyperliquid and add it to the database
-    # -------------------------------------------------------------------------------------------------------------
-    
-  
-    
-    df_id_perp = df_hl[["id", "perp"]]
-
-
-    
-    # Apply fetchDailyHyperliquid to each perp
-    ohlcv_data = df_id_perp["perp"].apply(lambda p: hl_api.fetchDailyHyperliquid(p, nDays=1, offset=0).iloc[0])
-
-    # Combine the OHLCV columns into the DataFrame
-    df_id_perp = pd.concat([df_id_perp, ohlcv_data.reset_index(drop=True)], axis=1)
-        
-    
-    
-    # Merge OHLCV and perp data into metadata on 'id'
-    metadata_with_ohlcv = metadata.merge(
-        df_id_perp.drop(columns=["perp"]),  # drop 'symbol' if already in metadata
-        on="id",
-        how="left"
-    )
-    
-    # Desired core column order
+    # Re-order columns
     core_order = ["id", "symbol", "ts", "open", "high", "low", "close", "volume", "market_cap", "category"]
-
-    # Ensure only columns that exist are used
-    existing_core = [col for col in core_order if col in metadata_with_ohlcv.columns]
-
-    # Get the rest of the columns (those not in core_order)
-    remaining_cols = [col for col in metadata_with_ohlcv.columns if col not in existing_core]
-
-    # Final column order
+    # Use df_final instead of metadata_with_ohlcv
+    existing_core = [col for col in core_order if col in df_final.columns]
+    remaining_cols = [col for col in df_final.columns if col not in existing_core]
     final_cols = existing_core + remaining_cols
 
-    # Reorder the DataFrame
-    metadata_with_ohlcv = metadata_with_ohlcv[final_cols]
+    df_final = df_final[final_cols]
     
-    
-    
-    
-    
-    
-    
-    
+    df_combined = pd.concat([df_existing, df_final], ignore_index=True)
 
-    # 1. Define file path
-    file_path = Path("dailyTop50ohclv_hl.parquet")
-
-    # 2. Get yesterday's date string
-    yesterday = (datetime.now().date() - timedelta(days=1))
-    yesterday_str = str(yesterday)
-
-    # 3. Load existing data if it exists
-    if file_path.exists():
-        df_existing = pd.read_parquet(file_path)
-    else:
-        df_existing = pd.DataFrame()
-
-    # 4. Check if yesterday's data already exists
-    if "ts" in df_existing.columns and yesterday in pd.to_datetime(df_existing["ts"]).dt.date.values:
-        print(f"Data for {yesterday_str} already exists — no update needed.")
-    else:
-        # 5. Append new rows
-        df_combined = pd.concat([df_existing, metadata_with_ohlcv], ignore_index=True)
-
-        # 6. Save updated data
-        df_combined.to_parquet(file_path, index=False)
-        print(f"Appended data for {yesterday_str} and saved to {file_path.name}.")
+    # 6. Save updated data
+    df_combined.to_parquet(file_path, index=False)
+    print("New data downloading successful")
+    
