@@ -94,21 +94,19 @@ if __name__ == "__main__":
     d.save_top50_history(df_tracked, "tracked_coins")
     print(f"Top 50 tracker updated. Now tracking {len(df_tracked)} coins.")
 
-
-
-
-
-
-
-
     df_tracked = df_tracked.drop(columns=["daysOutOfTop50"])  # df_tracked = [id, symbol]
+
+
+
+
+
 
     # Match perps
     df_tracked["perp"] = df_tracked["symbol"].map(lambda sym: d.find_matching_perp(sym, hl_perps))
     df_tracked = df_tracked[df_tracked["perp"].notna()].reset_index(drop=True)  # [id, symbol, perp]
 
     # Use yesterday (last full day)
-    yesterday = (datetime.now(timezone.utc).date() - timedelta(days=1))
+    yesterday = datetime.now() - timedelta(days=1)
 
     # Load existing data if it exists
     file_path = Path("dailyTop50ohclv_hl.parquet")
@@ -121,18 +119,18 @@ if __name__ == "__main__":
         latest_dates = (
             df_existing.groupby("id")["ts"]
             .max()
-            .dt.date
             .rename("last_ts")
         )
 
         df_tracked = df_tracked.merge(latest_dates, on="id", how="left")
     else:
-        df_tracked["last_ts"] = pd.NaT  # fill with NaT so .apply() works below
+        df_tracked["last_ts"] = datetime.now() - timedelta(days=100)
+
+
 
     # Compute daysToFetch
-    df_tracked["daysToFetch"] = (yesterday - df_tracked["last_ts"]).apply(
-        lambda x: x.days if pd.notnull(x) else 100
-    ).astype(int)
+    df_tracked["daysToFetch"] = (yesterday - df_tracked["last_ts"]).dt.days
+
 
     # Drop the helper column
     df_tracked = df_tracked.drop(columns=["last_ts"])
@@ -148,7 +146,7 @@ if __name__ == "__main__":
 
     for i, row in df_tracked.iterrows():
         try:
-            ohclv = hl_api.fetchDailyHyperliquid(row["perp"], row["daysToFetch"], 0)
+            ohclv = hl_api.fetchDailyHyperliquid(row["perp"], row["daysToFetch"], 1)
             if ohclv.empty:
                 print(f"No data for {row['symbol']} ({row['perp']})")
                 continue
@@ -185,17 +183,18 @@ if __name__ == "__main__":
     df_final = df_final.merge(metadata, on="id", how="left") # df_final = [id, symbol, ts, open, high, low, close, volume, market_cap, category, tags (several columns of boolean values)]
     
     
-    df_marketcaps = cmc_api.get_marketcap_snapshot(ids)
+    df_marketcaps = cmc_api.get_marketcap_snapshot(ids) # [id, market_cap]
     if df_marketcaps.empty:
         print("ERROR: Market cap snapshot is empty. Exiting.")
         exit()
         
-    # Ensure date format is compatible
+    yesterday_date = yesterday.date()
     df_final["ts"] = pd.to_datetime(df_final["ts"]).dt.date
-    # Replace market_cap only for yesterday
-    for _, row in df_marketcaps.iterrows():
-    mask = (df_final["id"] == row["id"]) & (df_final["ts"] == yesterday)
-    df_final.loc[mask, "market_cap"] = row["market_cap"]
+        
+    df_marketcaps["market_cap"] = df_marketcaps["market_cap"].round().astype("int64")
+    for id in ids:
+        mask = (df_final["id"] == id) & (df_final["ts"] == yesterday_date)
+        df_final.loc[mask, "market_cap"] = df_marketcaps.loc[df_marketcaps["id"] == id, "market_cap"].values[0]
         
     if  df_final.isnull().values.any():
         print("ERROR: None element found, exiting")
@@ -211,6 +210,9 @@ if __name__ == "__main__":
     df_final = df_final[final_cols]
     
     df_combined = pd.concat([df_existing, df_final], ignore_index=True)
+    # Force ts to proper datetime
+    df_combined["ts"] = pd.to_datetime(df_combined["ts"], errors="coerce")
+
 
     # 6. Save updated data
     df_combined.to_parquet(file_path, index=False)

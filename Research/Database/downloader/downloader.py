@@ -1,6 +1,7 @@
 import datetime
 import pandas as pd
 from pathlib import Path
+from datetime import datetime
 
 def load_top50_history(basename="tracked_coins"):
     """
