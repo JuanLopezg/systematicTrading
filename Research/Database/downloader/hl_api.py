@@ -19,7 +19,7 @@ def fetchDailyHyperliquid(perp: str, nDays: int, offset: int = 0):
 
     # Define date range
     end = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=offset)
-    start = end - timedelta(days=nDays)
+    start = end - timedelta(days=(nDays-1))
 
     start_ms = int(start.timestamp() * 1000)
     end_ms = int(end.timestamp() * 1000)

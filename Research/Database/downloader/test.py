@@ -1,17 +1,10 @@
 import pandas as pd
-import plotly.graph_objects as go
 
-# Load the Parquet file
+# Read the Parquet file
 df = pd.read_parquet("dailyTop50ohclv_hl.parquet")
 
+# Filter for symbol "PUMP" and select only 'ts' and 'market_cap' columns
+pump_df = df[df["symbol"] == "PUMP"][["ts", "market_cap"]]
+
 # Print the tail
-print(df.tail())
-
-# Filter rows where symbol is "PUMP"
-pump_df = df[df['symbol'] == 'BTC']
-
-# Save to CSV
-pump_df.to_csv('BTC.csv', index=False)
-
-print(f"Saved {len(pump_df)} rows with symbol 'PUMP' to pump_data.csv")
-print("Columns in the saved file:", pump_df.columns.tolist())
+print(pump_df.tail())

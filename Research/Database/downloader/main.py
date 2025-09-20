@@ -6,6 +6,7 @@ import pandas as pd
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from sys import exit
+from tqdm import tqdm
 
 import downloader as d
 import hl_api as hl_api
@@ -144,9 +145,10 @@ if __name__ == "__main__":
     # Collect OHCLV data for all ids
     ohclv_list = []
 
-    for i, row in df_tracked.iterrows():
+    for i, row in tqdm(df_tracked.iterrows(), total=len(df_tracked), desc="Fetching OHCLV"):
         try:
             ohclv = hl_api.fetchDailyHyperliquid(row["perp"], row["daysToFetch"], 1)
+            
             if ohclv.empty:
                 print(f"No data for {row['symbol']} ({row['perp']})")
                 continue
