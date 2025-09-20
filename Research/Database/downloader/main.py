@@ -104,8 +104,8 @@ if __name__ == "__main__":
             df_tracked = pd.concat([df_tracked, df_new], ignore_index=True)
 
     # Save updated tracking data
-    d.save_top50_history(df_tracked, "tracked_coins")
-    print(f"Top 50 tracker updated. Now tracking {len(df_tracked)} coins.")
+    top50history = df_tracked.copy() # to be saved at the end if there are no errors
+    print(f"Top 50 tracker tracking {len(df_tracked)} coins.")
 
     df_tracked = df_tracked.drop(columns=["daysOutOfTop50"])  # df_tracked = [id, symbol]
 
@@ -226,6 +226,9 @@ if __name__ == "__main__":
 
 
     # 6. Save updated data
+    d.save_top50_history(top50history, "tracked_coins")
+    print(f"Top 50 tracker updated. Now tracking {len(df_tracked)} coins.")
+    
     df_combined.to_parquet(file_path, index=False)
     print("New data downloading successful")
     
