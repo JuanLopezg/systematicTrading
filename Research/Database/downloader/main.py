@@ -5,7 +5,7 @@ import time
 import pandas as pd
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
-from sys import exit
+import sys
 from tqdm import tqdm
 
 import downloader as d
@@ -52,7 +52,11 @@ if __name__ == "__main__":
     # -------------------------------------------------------------------------------------------------------------
 
     # Load list of tracked coins 
-    df_tracked = d.load_top50_history("tracked_coins")
+    try:
+        df_tracked = d.load_top50_history("tracked_coins")
+    except Exception as e:
+        print(f"[ERROR] Failed to load top50 history: {e}")
+        sys.exit(1)
 
     # Normalize dtypes if not empty
     if not df_tracked.empty:
@@ -76,6 +80,14 @@ if __name__ == "__main__":
         df_tracked.loc[in_today, "daysOutOfTop50"] = 0
         df_tracked.loc[~in_today, "daysOutOfTop50"] += 1
 
+
+        # Find excluded coins
+        excluded = df_tracked[df_tracked["daysOutOfTop50"] >= 101]
+        # Print excluded symbols
+        if not excluded.empty:
+            print("Excluded coins (daysOutOfTop50 >= 101):")
+            print(excluded["symbol"].tolist())
+            
         # Remove coins that have been out of the top 50 for 100+ days
         df_tracked = df_tracked[df_tracked["daysOutOfTop50"] < 101].reset_index(drop=True)
 
@@ -96,10 +108,6 @@ if __name__ == "__main__":
     print(f"Top 50 tracker updated. Now tracking {len(df_tracked)} coins.")
 
     df_tracked = df_tracked.drop(columns=["daysOutOfTop50"])  # df_tracked = [id, symbol]
-
-
-
-
 
 
     # Match perps
@@ -147,15 +155,16 @@ if __name__ == "__main__":
 
     for i, row in tqdm(df_tracked.iterrows(), total=len(df_tracked), desc="Fetching OHCLV"):
         try:
-            ohclv = hl_api.fetchDailyHyperliquid(row["perp"], row["daysToFetch"], 1)
-            
-            if ohclv.empty:
-                print(f"No data for {row['symbol']} ({row['perp']})")
-                continue
+            if row["daysToFetch"] >= 1 :
+                ohclv = hl_api.fetchDailyHyperliquid(row["perp"], row["daysToFetch"], 1)
+                
+                if ohclv.empty:
+                    print(f"No data for {row['symbol']} ({row['perp']})")
+                    continue
 
-            ohclv["market_cap"] = 0  # Placeholder, if you plan to enrich this later
-            ohclv["id"] = row["id"]
-            ohclv_list.append(ohclv)
+                ohclv["market_cap"] = 0  # Placeholder, if you plan to enrich this later
+                ohclv["id"] = row["id"]
+                ohclv_list.append(ohclv)
 
         except Exception as e:
             print(f"Failed to fetch data for {row['symbol']} ({row['perp']}): {e}")
