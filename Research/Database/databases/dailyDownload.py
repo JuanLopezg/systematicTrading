@@ -176,7 +176,7 @@ df = pd.concat(dfs)
 # Add statistics for each cryptocurrency
 df['stat'] = df.groupby(['id'])['ts'].transform('min')
 df['end'] = df.groupby(['id'])['ts'].transform('max')
-df['hours'] = df.groupby(['id'])['ts'].transform('size')
+df['days'] = df.groupby(['id'])['ts'].transform('size')
 
 print("{0:0,.0f} cryptos".format(df['id'].nunique()))
 print("{0:0,.0f} observations".format(len(df)))
