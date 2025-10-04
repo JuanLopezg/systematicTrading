@@ -45,7 +45,7 @@ import time
 """
 
 # CoinMarketCap API Key
-KEY = 'sjdhifhowfhdsif'
+KEY = 'key'
 
 # Configure API headers
 headers = {
