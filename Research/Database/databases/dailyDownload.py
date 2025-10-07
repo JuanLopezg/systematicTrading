@@ -45,7 +45,7 @@ import time
 """
 
 # CoinMarketCap API Key
-KEY = 'key'
+KEY = '179c21ec-d0b1-472c-9443-4a8b371e2629'
 
 # Configure API headers
 headers = {
@@ -76,7 +76,7 @@ def get_daily_OHLCV(the_id):
         'id': the_id,
         'time_period': 'daily',
         'time_start': '2010-1-1',
-        'time_end': '2025-3-19'
+        'time_end': '2025-10-4'
     }
 
     session = Session()
@@ -96,7 +96,6 @@ def get_daily_OHLCV(the_id):
     except Exception as e:
         print(e)
         return None
-
 """### 3.1 Metadata Collection Function
 
 """
@@ -148,7 +147,7 @@ def get_metadata(the_ids):
 # We use this loop to gather data for ids from 1 to 40,000
 M = 1_000
 
-for N in range(37, 40 + 1):
+for N in range(1, 40 + 1):
     ids = range(M*(N-1)+1, M*N+1)
 
     res = []
