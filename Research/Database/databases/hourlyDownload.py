@@ -39,7 +39,7 @@ from requests import Request, Session
 from requests.exceptions import ConnectionError, Timeout, TooManyRedirects
 import json
 import time
-
+import gc
 """## 2. API Configuration
 
 """
@@ -148,17 +148,15 @@ def get_metadata(the_ids):
         print(e)
         return None
 
-"""## 4. Data Collection Process
+gc.collect()
+res = pd.read_parquet("crypto hourly 2025/metadata.par")
 
-### 4.1 Collect OHLCV Data for Cryptocurrencies
-"""
+ids_to_delete = res[(res['stablecoin'] == True) | (res['wrapped'] == True)]['id'].tolist()
 
+del res
+gc.collect()
 
-"""### 4.2 Collect Metadata for Cryptocurrencies
-
-"""
-
-files = g("crypto/OHLCV*.par")
+files = g("crypto hourly 2025/OHLCV*.par")
 print(f"{len(files)} files")
 dfs = []
 for file in files:
@@ -166,89 +164,25 @@ for file in files:
     dfs.append(df)
 df = pd.concat(dfs)
 
-# Add statistics for each cryptocurrency
+df.drop(ids_to_delete, inplace=True, errors='ignore')
+gc.collect()
+
+""" # Add statistics for each cryptocurrency
 df['stat'] = df.groupby(['id'])['ts'].transform('min')
 df['end'] = df.groupby(['id'])['ts'].transform('max')
 df['hours'] = df.groupby(['id'])['ts'].transform('size')
 
 print("{0:0,.0f} cryptos".format(df['id'].nunique()))
 print("{0:0,.0f} observations".format(len(df)))
+ """
 
-# Collect metadata for all cryptocurrencies
-res = []
-ids = df.groupby(['id']).first().sort_index().index
-M = 100
-N = int(max(ids) / M) + 1
 
-i = 1
-for the_id in tq(range(1, N+1)):
-    if i % 90 == 0:
-        time.sleep(80)  # Respect API rate limits
-    res.append(get_metadata(range((i-1)*M, (i)*M)))
-    i += 1
-
-res = pd.concat(res)
-assert df['id'].nunique() <= res['id'].nunique()
-
-"""### 4.3 Combine OHLCV Data with Metadata
-
-"""
 
 # Attach metadata to OHLCV data
-ds = df.set_index(['id']).copy(deep=False)
-ds[res.set_index(['id']).columns] = res.set_index(['id'])
-ds = ds.sort_values(['id', 'ts'])
+df.set_index('id', inplace=True)
+gc.collect()
 
-# Save the combined data
-res.to_parquet("crypto/metadata.par")
-ds.to_parquet("crypto/OHLCV_with_metadata.par")
+df.sort_values(['id', 'ts'], inplace=True)
+gc.collect()
 
-# Save the full OHLCV dataset
-df.to_parquet("crypto/full_OHLCV.par")
-
-"""## 5. Data Analysisqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq111111111111
-
-### 5.1 Load and Summarize Data
-"""
-
-# Load the previously saved data
-ds = pd.read_parquet("crypto/OHLCV_with_metadata.par")
-
-# Check available categories
-print("Available categories:")
-print(ds['category'].unique())
-
-# Count unique cryptocurrencies and total observations
-print("{0:0,.0f} cryptos".format(ds['symbol'].nunique()))
-print("{0:0,.0f} observations".format(len(ds)))
-
-# Create a summary dataframe with key metrics
-summary = ds.reset_index().groupby(['id']).agg({
-    'symbol': 'first',
-    'volume': 'sum',
-    'market_cap': 'last',
-    'close': 'last'
-}).sort_values('market_cap', ascending=False)
-
-# Display top 50 cryptocurrencies by market cap
-summary.head(50)
-
-"""### 5.2 Visualize Price Data for Selected Cryptocurrencies
-
-"""
-
-# Plot price history for a selected cryptocurrency
-# Change the_id to visualize different cryptocurrencies:
-# 1 = Bitcoin (BTC)
-# 2 = Litecoin (LTC)
-# 1027 = Ethereum (ETH)
-
-the_id = 1  # BTC
-
-fig, ax1 = plt.subplots(1, 1, figsize=(12, 6))
-te = ds.reset_index()
-te = te[te['id'] == the_id].set_index(['ts'])
-te['close'].plot()
-fig.suptitle(f"Price History for {te['symbol'].iloc[0]}")
-ax1.grid()
-plt.show()
+df.to_parquet("hourlyOHCLV.par")
