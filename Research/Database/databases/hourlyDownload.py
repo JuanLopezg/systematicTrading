@@ -167,14 +167,14 @@ df = pd.concat(dfs)
 df.drop(ids_to_delete, inplace=True, errors='ignore')
 gc.collect()
 
-""" # Add statistics for each cryptocurrency
+# Add statistics for each cryptocurrency
 df['stat'] = df.groupby(['id'])['ts'].transform('min')
 df['end'] = df.groupby(['id'])['ts'].transform('max')
 df['hours'] = df.groupby(['id'])['ts'].transform('size')
 
 print("{0:0,.0f} cryptos".format(df['id'].nunique()))
 print("{0:0,.0f} observations".format(len(df)))
- """
+
 
 
 
