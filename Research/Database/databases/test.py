@@ -21,14 +21,24 @@ if df.isna().any().any() :
     
     
 # Load the previously saved data
-ds = pd.read_parquet("systematictrading/Research/Database/databases/db/hourlyOHCLV.par")
+""" ds = pd.read_parquet("systematictrading/Research/Database/databases/db/hourlyOHCLV.par")
 
 the_id = 1  # BTC
+theid2 = 36507
 
 fig, ax1 = plt.subplots(1, 1, figsize=(12, 6))
 te = ds.reset_index()
-te = te[te['id'] == the_id].set_index(['ts'])
+te = te[te['id'] == theid2].set_index(['ts'])
 te['close'].plot()
 fig.suptitle(f"Price History for {te['symbol'].iloc[0]}")
 ax1.grid()
-plt.show()
+plt.show() """
+
+""" ds = pd.read_parquet("crypto4H/OHLCV_1.par")
+print(ds.tail(20))
+del ds """
+ds = pd.read_parquet("crypto hourly 2025/OHLCV_1.par")
+print(ds.tail(10))
+ds.drop(columns=['volume'], inplace=True)
+if ds.isna().any().any() :
+    raise ValueError("Nan Values") 
