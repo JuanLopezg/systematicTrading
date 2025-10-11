@@ -34,11 +34,41 @@ fig.suptitle(f"Price History for {te['symbol'].iloc[0]}")
 ax1.grid()
 plt.show() """
 
-""" ds = pd.read_parquet("crypto4H/OHLCV_1.par")
+ds = pd.read_parquet("crypto4H/OHLCV_1.par")
 print(ds.tail(20))
-del ds """
-ds = pd.read_parquet("crypto hourly 2025/OHLCV_1.par")
-print(ds.tail(10))
-ds.drop(columns=['volume'], inplace=True)
-if ds.isna().any().any() :
-    raise ValueError("Nan Values") 
+
+# --- Check for coins with market_cap == 0 ---
+zero_mc = ds[ds["market_cap"] == 0]
+
+if not zero_mc.empty:
+    zero_symbols = zero_mc["symbol"].unique()
+    print(f"\n⚠️ {len(zero_symbols)} coins have at least one row with market_cap = 0:")
+    print(", ".join(zero_symbols))
+else:
+    print("\n✅ No coins have market_cap = 0")
+
+# --- Check for NaN values ---
+if ds.isna().any().any():
+    raise ValueError("❌ Dataset contains NaN values")
+
+print("\n✅ Dataset passed validation checks!")
+
+# --- Identify IDs with more than one row where market_cap == 0 ---
+ids_to_drop = (
+    ds[ds["market_cap"] == 0]
+    .groupby("id")
+    .size()
+    .loc[lambda x: x > 1]
+    .index
+)
+
+print(f"\n⚠️ {len(ids_to_drop)} IDs have more than one market_cap = 0")
+
+if len(ids_to_drop) > 0:
+    # Show the symbols (for context)
+    symbols_to_drop = ds.loc[ds["id"].isin(ids_to_drop), "symbol"].unique()
+    print("Symbols to drop:", ", ".join(symbols_to_drop))
+
+    # Drop all rows for those IDs
+    ds = ds[~ds["id"].isin(ids_to_drop)]
+    print(f"✅ Dropped {len(ids_to_drop)} coins with >1 zero market_cap rows")
