@@ -6,14 +6,16 @@ from glob import glob as g
 files = g("crypto hourly 2025/OHLCV*.par")
 print(f"{len(files)} files")
 
-# timeframe in hours
-timeframes = [2,4,8,12]
+hours = [3,6,12]
+tf = 24
 
-for tf in timeframes :
+for nHoursShifted in hours :
+
     # Output folder
-    folder_name = f'crypto{tf}H'
+    folder_name = f'cryptoDailyShiftedBy{nHoursShifted}H'
     folder_path = os.path.join('./', folder_name)
     os.makedirs(folder_path, exist_ok=True)
+
 
     # Iterate over each file
     for file in files:
@@ -21,7 +23,7 @@ for tf in timeframes :
         df = df.drop(columns=['volume'])  # don’t mutate in place
 
         # Filter out ids with too few rows
-        ids_to_drop = df.groupby('id').filter(lambda x: len(x) < tf * 3)['id'].unique()
+        ids_to_drop = df.groupby('id').filter(lambda x: len(x) < tf * 2)['id'].unique()
         df = df[~df['id'].isin(ids_to_drop)]
 
         # Container for all aggregated data from this file
@@ -33,11 +35,11 @@ for tf in timeframes :
             id_df['ts'] = pd.to_datetime(id_df['ts'])
 
             # Find valid start/end aligned to the timeframe
-            valid_times = id_df[id_df['ts'].dt.hour % tf == 0]
+            valid_times = id_df[id_df['ts'].dt.hour == nHoursShifted]
             if valid_times.empty:
                 continue
             if len(valid_times) < 2:
-                continue  # not enough full groups
+                    continue  # not enough full groups
 
             valid_start_time = valid_times.iloc[0]['ts']
             valid_end_time = valid_times.iloc[-1]['ts']
@@ -66,7 +68,7 @@ for tf in timeframes :
 
         # Build new aggregated dataset for this file
         agg_df = pd.DataFrame(all_new_rows)
-        
+            
         # --- Identify IDs with more than one row where market_cap == 0 ---
         ids_to_drop = (
             agg_df[agg_df["market_cap"] == 0]
@@ -77,7 +79,6 @@ for tf in timeframes :
         )
 
         if len(ids_to_drop) > 0:
-
             # Drop all rows for those IDs
             agg_df = agg_df[~agg_df["id"].isin(ids_to_drop)]
 
