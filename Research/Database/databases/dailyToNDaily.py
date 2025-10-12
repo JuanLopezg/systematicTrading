@@ -11,10 +11,13 @@ timeframes = [2,3,5,7,14,21,30]
 
 for tf in timeframes :
     # Output folder
-    file_name = f'{tf}DOHCLV.par'
+    file_name = f'{tf}dOHLCV.par'
     folder_path = "systematictrading/Research/Database/databases/db/"
 
     df = pd.read_parquet(file)
+    
+    if df.isna().any().any():
+        raise ValueError("❌ Dataset contains NaN values")
 
     # Filter out ids with too few rows
     ids_to_drop = df.groupby('id').filter(lambda x: len(x) < tf * 3)['id'].unique()
@@ -22,21 +25,20 @@ for tf in timeframes :
 
     # Container for all aggregated data from this file
     all_new_rows = []
+    
+    start_date = pd.Timestamp('1970-01-01') # unix epoch
 
     # Process each unique id separately
     for id_value, id_df in df.groupby('id', sort=False):
         id_df = id_df.copy()
         id_df['ts'] = pd.to_datetime(id_df['ts'])
 
+        # Extract only the date (drop time)
+        id_df['date'] = id_df['ts'].dt.floor('D')  
 
-
-
-
-
-
-
-        # Find valid start/end aligned to the timeframe
-        valid_times = id_df[id_df['ts'].dt.hour % tf == 0]
+        # Keep only rows where the day aligns with n-day intervals
+        valid_times = id_df[((id_df['ts'].dt.floor('D') - start_date).dt.days % tf) == 0]
+        
         if valid_times.empty:
             continue
         if len(valid_times) < 2:
@@ -63,29 +65,17 @@ for tf in timeframes :
                 'high': slice_df['high'].max(),
                 'low': slice_df['low'].min(),
                 'close': slice_df['close'].iloc[-1],
+                'volume': slice_df['volume'].sum(),
                 'market_cap': slice_df['market_cap'].iloc[-1],
+                'rank': slice_df['rank'].iloc[-1]
             }
             all_new_rows.append(new_rows)
 
     # Build new aggregated dataset for this file
     agg_df = pd.DataFrame(all_new_rows)
-    
-    # --- Identify IDs with more than one row where market_cap == 0 ---
-    ids_to_drop = (
-        agg_df[agg_df["market_cap"] == 0]
-        .groupby("id")
-        .size()
-        .loc[lambda x: x > 1]
-        .index
-    )
-
-    if len(ids_to_drop) > 0:
-
-        # Drop all rows for those IDs
-        agg_df = agg_df[~agg_df["id"].isin(ids_to_drop)]
 
     # Save new aggregated dataset (not the original df)
-    file_name = os.path.basename(file)
+    file_name = os.path.basename(file_name)
     agg_df.to_parquet(f'{folder_path}/{file_name}')
 
     # Clean up memory

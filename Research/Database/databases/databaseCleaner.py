@@ -1,7 +1,7 @@
 import pandas as pd
 
 # Read the Parquet file
-df = pd.read_parquet("crypto/ohlcvmeta.par")
+df = pd.read_parquet("crypto daily 2010 2025 oct/ohlcvmeta.par")
 
 df = df.reset_index()
 

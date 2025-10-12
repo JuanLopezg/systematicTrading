@@ -33,7 +33,7 @@ te['close'].plot()
 fig.suptitle(f"Price History for {te['symbol'].iloc[0]}")
 ax1.grid()
 plt.show() """
-
+""" 
 ds = pd.read_parquet("crypto4H/OHLCV_1.par")
 print(ds.tail(20))
 
@@ -71,4 +71,8 @@ if len(ids_to_drop) > 0:
 
     # Drop all rows for those IDs
     ds = ds[~ds["id"].isin(ids_to_drop)]
-    print(f"✅ Dropped {len(ids_to_drop)} coins with >1 zero market_cap rows")
+    print(f"✅ Dropped {len(ids_to_drop)} coins with >1 zero market_cap rows") """
+    
+    
+ds = pd.read_parquet("systematictrading/Research/Database/databases/db/30dOHLCV.par")
+print(ds.head(30))
