@@ -1,5 +1,7 @@
 import pandas as pd
 import matplotlib.pyplot as plt
+import plotly.graph_objects as go
+
 """ 
 for i in range(1, 39):  
     path = f"crypto/OHLCV_{i}.par"
@@ -74,5 +76,47 @@ if len(ids_to_drop) > 0:
     print(f"✅ Dropped {len(ids_to_drop)} coins with >1 zero market_cap rows") """
     
     
-ds = pd.read_parquet("systematictrading/Research/Database/databases/db/30dOHLCV.par")
-print(ds.head(30))
+import plotly.graph_objects as go
+import plotly.io as pio
+
+ds = pd.read_parquet("rest of data just in case/crypto4/crypto/OHLCV_with_metadata.par")
+
+# ds = pd.read_parquet("systematictrading/Research/Database/databases/db/hourlyOHCLV.par")
+
+pio.renderers.default = "browser"  # <<— Add this line
+
+if ds.index.name == 'id' or 'id' not in ds.columns:
+    ds = ds.reset_index()
+
+target_id = 36507
+
+# ✅ Check if the ID exists
+if target_id not in ds['id'].unique():
+    print(f"❌ ID {target_id} not found in dataset. Available IDs: {ds['id'].unique()}")
+else:
+    df = ds[ds['id'] == target_id].sort_values('ts')
+
+    if df.empty:
+        print(f"⚠️ No data available for ID {target_id}.")
+    else:
+        # Create candlestick chart
+        fig = go.Figure(data=[
+            go.Candlestick(
+                x=df['ts'],
+                open=df['open'],
+                high=df['high'],
+                low=df['low'],
+                close=df['close'],
+                name='Price'
+            )
+        ])
+
+        fig.update_layout(
+            title=f"Candlestick Chart for ID = {target_id}",
+            xaxis_title="Date",
+            yaxis_title="Price",
+            xaxis_rangeslider_visible=False,
+            template="plotly_dark"
+        )
+
+        fig.show()
