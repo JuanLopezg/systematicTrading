@@ -154,7 +154,7 @@ def get_metadata(the_ids):
 ### 4.1 Collect OHLCV Data for Cryptocurrencies
 """
 # We use this loop to gather data for ids from 1 to 40,000
-""" M = 1_000
+M = 1_000
 
 for N in range(1, 40 + 1):
     ids = range(M*(N-1)+1, M*N+1)
@@ -168,7 +168,7 @@ for N in range(1, 40 + 1):
 
     if res:
         res = pd.concat(res)
-        res.to_parquet(f"crypto/OHLCV_{N}.par") """
+        res.to_parquet(f"crypto/OHLCV_{N}.par")
         
 
 """### 4.2 Collect Metadata for Cryptocurrencies
