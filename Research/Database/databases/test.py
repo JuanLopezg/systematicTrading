@@ -79,7 +79,7 @@ if len(ids_to_drop) > 0:
 import plotly.graph_objects as go
 import plotly.io as pio
 
-ds = pd.read_parquet("rest of data just in case/crypto4/crypto/OHLCV_with_metadata.par")
+ds = pd.read_parquet("crypto/OHLCV_37.par")
 
 # ds = pd.read_parquet("systematictrading/Research/Database/databases/db/hourlyOHCLV.par")
 

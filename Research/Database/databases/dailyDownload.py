@@ -70,13 +70,14 @@ def get_daily_OHLCV(the_id):
     Returns:
     DataFrame: OHLCV data for the specified cryptocurrency
     """
-    time.sleep(0.01)  # We have a limit of 90 calls per minute
+    time.sleep(0.7)  # We have a limit of 90 calls per minute
+    os.makedirs("crypto", exist_ok=True)
     url = base_url + 'v2/cryptocurrency/ohlcv/historical'
     parameters = {
         'id': the_id,
         'time_period': 'daily',
         'time_start': '2010-1-1',
-        'time_end': '2025-10-4'
+        'time_end': '2025-10-13'
     }
 
     session = Session()
@@ -84,6 +85,7 @@ def get_daily_OHLCV(the_id):
 
     try:
         response = session.get(url, params=parameters)
+        response.raise_for_status()  # raises HTTPError for bad responses
         data = json.loads(response.text)
         te = pd.DataFrame(
             [data['data']['quotes'][x]['quote']['USD'] for x in range(len(data['data']['quotes']))]
@@ -95,7 +97,14 @@ def get_daily_OHLCV(the_id):
         return te
     except Exception as e:
         print(e)
+         # Log errors to file
+        log_path = os.path.join("crypto", "errors.log")
+        with open(log_path, "a") as f:
+            f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Error fetching ID {the_id}: {e}\n")
+        print(f"Error fetching ID {the_id}: {e}")
         return None
+    
+
 """### 3.1 Metadata Collection Function
 
 """
@@ -145,7 +154,7 @@ def get_metadata(the_ids):
 ### 4.1 Collect OHLCV Data for Cryptocurrencies
 """
 # We use this loop to gather data for ids from 1 to 40,000
-M = 1_000
+""" M = 1_000
 
 for N in range(1, 40 + 1):
     ids = range(M*(N-1)+1, M*N+1)
@@ -153,12 +162,14 @@ for N in range(1, 40 + 1):
     res = []
     for the_id in tq(ids):
         df = get_daily_OHLCV(the_id)
-        if df is None or not isinstance(df, pd.DataFrame) or df.empty:
+        if df is None or df.empty:
             continue
         res.append(df)
 
     if res:
-        pd.concat(res, ignore_index=True).to_parquet(f"crypto/OHLCV_{N}.par")
+        res = pd.concat(res)
+        res.to_parquet(f"crypto/OHLCV_{N}.par") """
+        
 
 """### 4.2 Collect Metadata for Cryptocurrencies
 
@@ -201,7 +212,7 @@ assert df['id'].nunique() <= res['id'].nunique()
 """
 
 # Attach metadata to OHLCV data
-ds = df.set_index(['id']).copy(deep=False)
+ds = df.set_index(['id']).copy()
 ds[res.set_index(['id']).columns] = res.set_index(['id'])
 ds = ds.sort_values(['id', 'ts'])
 
@@ -249,7 +260,7 @@ summary.head(50)
 # 2 = Litecoin (LTC)
 # 1027 = Ethereum (ETH)
 
-the_id = 1  # BTC
+the_id = 36507  # BTC
 
 fig, ax1 = plt.subplots(1, 1, figsize=(12, 6))
 te = ds.reset_index()
