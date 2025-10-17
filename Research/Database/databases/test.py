@@ -23,7 +23,8 @@ if df.isna().any().any() :
     
     
 # Load the previously saved data
-""" ds = pd.read_parquet("systematictrading/Research/Database/databases/db/hourlyOHCLV.par")
+#ds = pd.read_parquet("systematictrading/Research/Database/databases/db/hourlyOHCLV.par")
+ds = pd.read_parquet("crypto/OHLCV_with_metadata.par")
 
 the_id = 1  # BTC
 theid2 = 36507
@@ -34,7 +35,9 @@ te = te[te['id'] == theid2].set_index(['ts'])
 te['close'].plot()
 fig.suptitle(f"Price History for {te['symbol'].iloc[0]}")
 ax1.grid()
-plt.show() """
+plt.show()
+
+
 """ 
 ds = pd.read_parquet("crypto4H/OHLCV_1.par")
 print(ds.tail(20))
@@ -74,49 +77,5 @@ if len(ids_to_drop) > 0:
     # Drop all rows for those IDs
     ds = ds[~ds["id"].isin(ids_to_drop)]
     print(f"✅ Dropped {len(ids_to_drop)} coins with >1 zero market_cap rows") """
+
     
-    
-import plotly.graph_objects as go
-import plotly.io as pio
-
-ds = pd.read_parquet("crypto/OHLCV_37.par")
-
-# ds = pd.read_parquet("systematictrading/Research/Database/databases/db/hourlyOHCLV.par")
-
-pio.renderers.default = "browser"  # <<— Add this line
-
-if ds.index.name == 'id' or 'id' not in ds.columns:
-    ds = ds.reset_index()
-
-target_id = 36507
-
-# ✅ Check if the ID exists
-if target_id not in ds['id'].unique():
-    print(f"❌ ID {target_id} not found in dataset. Available IDs: {ds['id'].unique()}")
-else:
-    df = ds[ds['id'] == target_id].sort_values('ts')
-
-    if df.empty:
-        print(f"⚠️ No data available for ID {target_id}.")
-    else:
-        # Create candlestick chart
-        fig = go.Figure(data=[
-            go.Candlestick(
-                x=df['ts'],
-                open=df['open'],
-                high=df['high'],
-                low=df['low'],
-                close=df['close'],
-                name='Price'
-            )
-        ])
-
-        fig.update_layout(
-            title=f"Candlestick Chart for ID = {target_id}",
-            xaxis_title="Date",
-            yaxis_title="Price",
-            xaxis_rangeslider_visible=False,
-            template="plotly_dark"
-        )
-
-        fig.show()
