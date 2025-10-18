@@ -68,8 +68,7 @@ for id_value, id_df in df.groupby('id', sort=False):
             'low': slice_df['low'].min(),
             'close': slice_df['close'].iloc[-1],
             'volume': slice_df['volume'].sum(),
-            'market_cap': slice_df['market_cap'].iloc[-1],
-            'rank': slice_df['rank'].iloc[-1]
+            'market_cap': slice_df['market_cap'].iloc[-1]
         }
         all_new_rows.append(new_rows)
 

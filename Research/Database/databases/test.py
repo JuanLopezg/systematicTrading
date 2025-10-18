@@ -23,8 +23,8 @@ if df.isna().any().any() :
     
     
 # Load the previously saved data
-#ds = pd.read_parquet("systematictrading/Research/Database/databases/db/hourlyOHCLV.par")
-ds = pd.read_parquet("crypto/OHLCV_with_metadata.par")
+ds = pd.read_parquet("systematictrading/Research/Database/databases/db/1weekOHLCV.par")
+#ds = pd.read_parquet("crypto/OHLCV_with_metadata.par")
 
 the_id = 1  # BTC
 theid2 = 36507
