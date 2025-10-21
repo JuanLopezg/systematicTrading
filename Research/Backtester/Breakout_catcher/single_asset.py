@@ -36,6 +36,7 @@ df = df.sort_values("ts").reset_index(drop=True)
 df["ts"] = pd.to_datetime(df["ts"])       # ensure ts is a datetime dtype
 df = df[df["ts"] >= "2020-01-01"].copy()
 
+
 # Ensure boolean columns
 for c in ["entry", "exit", "in_position"]:
     df[c] = df[c].astype(bool)
@@ -133,3 +134,50 @@ print("\nFinal capital:", round(df["capital"].iloc[-1], 2))
 print("Final equity :", round(df["equity"].iloc[-1], 2))
 print("Total trades :", df["entry"].sum())
 
+
+
+# ============================================================
+# Plotting (single y-axis: BTC vs scaled equity)
+# ============================================================
+
+fig, ax = plt.subplots(figsize=(14, 7))
+
+# --- Normalize equity so it starts at BTC price on the first day ---
+if "equity" in df.columns:
+    first_price = df["close"].iloc[0]
+    df["equity_scaled"] = df["equity"] * (first_price / df["equity"].iloc[0])
+
+# --- BTC price series ---
+ax.plot(df["ts"], df["close"], label="BTC Close", color="black", linewidth=1.3)
+
+# --- Optional overlays ---
+if "20dHigh" in df.columns:
+    ax.plot(df["ts"], df["20dHigh"], label="20-day High", color="orange",
+            linestyle="--", linewidth=1.2)
+if "SL3ATR" in df.columns:
+    ax.plot(df["ts"], df["SL3ATR"], label="Trailing Stop (3×ATR)",
+            color="red", linestyle=":")
+
+# --- Scaled equity curve ---
+if "equity_scaled" in df.columns:
+    ax.plot(df["ts"], df["equity_scaled"], color="blue",
+            linewidth=1.5, alpha=0.8, label="Equity (scaled)")
+
+# --- Entry / Exit markers ---
+if "entry" in df.columns:
+    entries = df.loc[df["entry"]]
+    ax.scatter(entries["ts"], entries["close"],
+               marker="^", color="green", s=90, label="Entry", zorder=5)
+if "exit" in df.columns:
+    exits = df.loc[df["exit"]]
+    ax.scatter(exits["ts"], exits["close"],
+               marker="v", color="red", s=90, label="Exit", zorder=5)
+
+# --- Aesthetics ---
+ax.set_xlabel("Date")
+ax.set_ylabel("BTC Price / Scaled Equity")
+ax.grid(alpha=0.3)
+ax.legend(loc="upper left", fontsize=9)
+plt.title("BTC vs Strategy Equity (Normalized to BTC Price on Start Date)", fontsize=14)
+plt.tight_layout()
+plt.show()

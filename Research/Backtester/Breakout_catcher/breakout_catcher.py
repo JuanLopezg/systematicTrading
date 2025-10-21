@@ -104,7 +104,7 @@ df = df.groupby('id', group_keys=False).apply(compute_with_numba)
 
 print(df[['id', 'ts', 'close', '20dHigh', 'signal', 'ATR14', 'entry', 'exit', 'in_position', 'SL3ATR']].head(50))
 
-
+#df = df[df["id"] == 1027].copy() # just save for one asset to check
 # Save to a local Parquet file
 df.to_parquet("./systematictrading/Research/Backtester/backtests/breakout_catcher.par", index=False)
 

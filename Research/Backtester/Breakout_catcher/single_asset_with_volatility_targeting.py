@@ -1,0 +1,208 @@
+"""
+Volatility-based position sizing backtest
+-----------------------------------------
+
+- Each trade size = closed_capital * risk_fraction / (k * ATR)
+- Closed capital updates only on trade exit
+- Tracks size, closed capital, unrealized PnL, and total equity
+- Fast: Numba JIT for per-row calculations
+"""
+
+import pandas as pd
+import numpy as np
+from numba import njit
+import gc
+import matplotlib.pyplot as plt
+
+
+
+# ============================================================
+# Parameters
+# ============================================================
+
+FILE = "./systematictrading/Research/Backtester/backtests/btc_breakout_catcher.parquet"
+
+initial_capital = 100_000.0
+risk_fraction = 0.1       # fraction of closed equity used for next trade (per asset)
+k = 3.0                   # ATR multiplier for sizing
+nAssets = 10              # number of total max positions each time
+threshold = 0.2           # % of move in the ATR to trigger rebalancing
+
+
+# ============================================================
+# Load data
+# ============================================================
+
+df = pd.read_parquet(FILE)
+df = df.sort_values("ts").reset_index(drop=True)
+df["ts"] = pd.to_datetime(df["ts"])       # ensure ts is a datetime dtype
+df = df[df["ts"] >= "2020-01-01"].copy()
+
+# Ensure boolean columns
+for c in ["entry", "exit", "in_position"]:
+    df[c] = df[c].astype(bool)
+
+
+# ============================================================
+# Numba JIT function
+# ============================================================
+
+@njit
+def compute_with_equity(entry, exit_, close, atr, k, capital0, risk_fraction, threshold):
+    """
+    Compute daily position size, closed capital, unrealized PnL, and equity.
+
+    Args:
+        entry (bool array): Entry signal
+        exit_ (bool array): Exit signal
+        close (float array): Close prices
+        atr (float array): ATR values
+        k (float): ATR multiplier
+        capital0 (float): Initial capital
+        risk_fraction (float): Fraction of closed equity to risk each trade
+        threshold (float): % of move in the ATR to trigger rebalancing
+    Returns:
+        tuple of arrays: (size, closed_capital, unrealized_pnl, equity)
+    """
+    n = len(close)
+    size = np.zeros(n)
+    capital_arr = np.zeros(n)
+    unrealized = np.zeros(n)
+    equity = np.zeros(n)
+
+    capital = capital0
+    in_pos = False
+    entry_price = 0.0
+    units = 0.0
+    reference_atr = 0.0
+
+    for i in range(n):
+        if entry[i] and not in_pos:
+            # --- new position ---
+            risk_capital = capital * risk_fraction
+            units = risk_capital / (k * atr[i]) if atr[i] > 0 else 0.0
+            reference_atr = atr[i]
+            entry_price = close[i]
+            in_pos = True
+            size[i] = units
+
+        elif in_pos:
+
+            if exit_[i]:
+                # --- close position ---
+                pnl = (close[i] - entry_price) * units
+                capital += pnl
+                in_pos = False
+                units = 0.0
+                entry_price = 0.0
+                size[i] = 0
+            else :
+                # modify existing position in case the volatility changes more than threshold %
+                if abs(reference_atr - atr[i]) > threshold*reference_atr :
+                    prev_units = units
+                    units = risk_capital / (k * atr[i]) if atr[i] > 0 else 0.0
+                    reference_atr = atr[i]
+                    size[i] = units
+                    if  (size[i-1]-size[i]) > 0: # selling units
+                        capital += (size[i-1]-size[i]) *  (close[i] - entry_price) 
+                    else: # buying units
+                        entry_price = (entry_price * prev_units + close[i] * (units-prev_units)) / units
+                else:
+                    size[i] = units
+
+
+        else:
+            # --- no position ---
+            size[i] = 0.0
+
+        # --- per-row bookkeeping ---
+        capital_arr[i] = capital
+        unrealized[i] = (close[i] - entry_price) * units if in_pos else 0.0
+        equity[i] = capital + unrealized[i]
+
+    return size, capital_arr, unrealized, equity
+
+
+# ============================================================
+# Run computation
+# ============================================================
+
+df["size"], df["capital"], df["unrealized_pnl"], df["equity"] = compute_with_equity(
+    df["entry"].to_numpy(dtype=np.bool_),
+    df["exit"].to_numpy(dtype=np.bool_),
+    df["close"].to_numpy(np.float64),
+    df["ATR14"].to_numpy(np.float64),
+    k,
+    initial_capital,
+    risk_fraction,
+    threshold
+)
+
+# Set zero when not in position (safety)
+df.loc[~df["in_position"], "size"] = 0.0
+
+gc.collect()
+
+# ============================================================
+# Output / inspection
+# ============================================================
+
+# Example summary stats
+print("\nFinal capital:", round(df["capital"].iloc[-1], 2))
+print("Final equity :", round(df["equity"].iloc[-1], 2))
+print("Total trades :", df["entry"].sum())
+
+
+# ============================================================
+# Plotting (single y-axis: BTC vs scaled equity and capital)
+# ============================================================
+
+fig, ax = plt.subplots(figsize=(14, 7))
+
+# --- Normalize equity & capital so both start at BTC price on the first day ---
+if "equity" in df.columns:
+    first_price = df["close"].iloc[0]
+    df["equity_scaled"] = df["equity"] * (first_price / df["equity"].iloc[0])
+
+if "capital" in df.columns:
+    df["capital_scaled"] = df["capital"] * (first_price / df["capital"].iloc[0])
+
+# --- BTC price series ---
+ax.plot(df["ts"], df["close"], label="BTC Close", color="black", linewidth=1.3)
+
+# --- Optional overlays ---
+if "20dHigh" in df.columns:
+    ax.plot(df["ts"], df["20dHigh"], label="20-day High", color="orange",
+            linestyle="--", linewidth=1.2)
+if "SL3ATR" in df.columns:
+    ax.plot(df["ts"], df["SL3ATR"], label="Trailing Stop (3×ATR)",
+            color="red", linestyle=":")
+
+# --- Scaled equity curve ---
+if "equity_scaled" in df.columns:
+    ax.plot(df["ts"], df["equity_scaled"], color="blue",
+            linewidth=1.5, alpha=0.8, label="Equity (scaled)")
+
+# --- Scaled capital curve (closed P&L only) ---
+if "capital_scaled" in df.columns:
+    ax.plot(df["ts"], df["capital_scaled"], color="green",
+            linewidth=1.5, alpha=0.7, linestyle="--", label="Closed Capital (scaled)")
+
+# --- Entry / Exit markers ---
+if "entry" in df.columns:
+    entries = df.loc[df["entry"]]
+    ax.scatter(entries["ts"], entries["close"],
+               marker="^", color="green", s=90, label="Entry", zorder=5)
+if "exit" in df.columns:
+    exits = df.loc[df["exit"]]
+    ax.scatter(exits["ts"], exits["close"],
+               marker="v", color="red", s=90, label="Exit", zorder=5)
+
+# --- Aesthetics ---
+ax.set_xlabel("Date")
+ax.set_ylabel("BTC Price / Scaled Equity & Capital")
+ax.grid(alpha=0.3)
+ax.legend(loc="upper left", fontsize=9)
+plt.title("BTC vs Strategy – Price, Scaled Equity, and Closed Capital", fontsize=14)
+plt.tight_layout()
+plt.show()
